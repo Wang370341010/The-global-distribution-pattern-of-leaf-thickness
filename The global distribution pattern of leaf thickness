@@ -1,0 +1,197 @@
+###machine learning model
+import os
+import pandas as pd
+import numpy as np
+from sklearn.ensemble import RandomForestRegressor, GradientBoostingRegressor
+from lightgbm import LGBMRegressor
+from sklearn.tree import DecisionTreeRegressor
+from sklearn.model_selection import train_test_split, cross_val_score
+from sklearn.metrics import mean_absolute_error, r2_score, mean_squared_error
+from sklearn.preprocessing import MinMaxScaler, LabelEncoder
+import matplotlib.pyplot as plt
+
+os.environ['JOBLIB_TEMP_FOLDER'] = 'C:/temp'
+os.environ['PYTHONIOENCODING'] = 'utf-8'
+
+df_path = 'C:/New_Global plant functional trait/Global_LT/LT_ALL_New_Drop.csv'
+df = pd.read_csv(df_path)
+
+print("Checking for NaN values:")
+print(df.isnull().sum())
+
+num_features = [
+    'Altitude', 'Drought_index', 'MAT', 'Isothermality', 'Mean_Diurnal_Range',
+    'Temperature_Seasonality', 'Temperature_Annual_Range', 'Mean_Temperature_of_Wettest_Quarter', 'Mean_Temperature_of_Driest_Quarter', 'Mean_Temperature_of_Warmest_Quarter', 'Mean_Temperature_of_Coldest_Quarter',
+    'Precipitation_of_Wettest_Month', 'Precipitation_of_Driest_Month',
+    'Precipitation_Seasonality', 'Precipitation_of_Wettest_Quarter',
+    'Precipitation_of_Warmest_Quarter', 'Soil_clay', 'Soil_cn', 'Soil_n',
+    'Soil_ph', 'Soil_sand', 'Soil_silt', 'LAI', 'Slope', 'Roughness', 'GPP', 'NDVI',
+    'Longitude', 'Latitude'
+]
+cat_features = ['PlantGrowthForm']
+
+scaler = MinMaxScaler()
+df[num_features] = scaler.fit_transform(df[num_features])
+
+label_encoder = LabelEncoder()
+for feature in cat_features:
+    df[feature] = label_encoder.fit_transform(df[feature])
+
+X = df.drop(columns=['LT'])
+y = df['LT'].values
+
+X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=0.2, random_state=42)
+
+# Define a list of models
+models = {
+    'Random Forest': RandomForestRegressor(random_state=42),
+    'Gradient Boosting': GradientBoostingRegressor(random_state=42),
+    'LightGBM': LGBMRegressor(objective='regression', random_state=42),
+    'Decision Tree': DecisionTreeRegressor(random_state=42)
+}
+
+# Define evaluation and plotting functions
+def evaluate_model(model, model_name, X_train, y_train, X_test, y_test):
+    model.fit(X_train, y_train)
+
+    # 10-fold cross-validation
+    cv_r2_scores = cross_val_score(model, X_train, y_train, cv=10, scoring='r2')
+    cv_mae_scores = cross_val_score(model, X_train, y_train, cv=10, scoring='neg_mean_absolute_error')
+    cv_rmse_scores = cross_val_score(model, X_train, y_train, cv=10, scoring='neg_root_mean_squared_error')
+
+    print(f"{model_name} Cross-validation R² scores: {cv_r2_scores}")
+    print(f"{model_name} Average R² score: {cv_r2_scores.mean()}")
+    print(f"{model_name} Cross-validation MAE scores: {-cv_mae_scores}")
+    print(f"{model_name} Average MAE score: {-cv_mae_scores.mean()}")
+    print(f"{model_name} Cross-validation RMSE scores: {-cv_rmse_scores}")
+    print(f"{model_name} Average RMSE score: {-cv_rmse_scores.mean()}")
+
+    y_pred = model.predict(X_test)
+
+    # Evaluating model performance
+    mae = mean_absolute_error(y_test, y_pred)
+    r2 = r2_score(y_test, y_pred)
+    rmse = np.sqrt(mean_squared_error(y_test, y_pred))
+    print(f"{model_name} Mean Absolute Error (MAE): {mae}")
+    print(f"{model_name} Coefficient of Determination (R²): {r2}")
+    print(f"{model_name} Root Mean Squared Error (RMSE): {rmse}")
+
+    # Plotting of observed and predicted values
+    plt.figure(figsize=(10, 6))
+    ratio = y_pred / y_test
+    min_val = min(min(y_test), min(y_pred))
+    max_val = max(max(y_test), max(y_pred))
+    x_vals = np.array([min_val, max_val])
+    y_lower = x_vals * 0.5
+    y_upper = x_vals * 1.5
+    plt.fill_between(x_vals, y_lower, y_upper, color='lightgray', alpha=0.5, zorder=1)
+    plt.plot([min_val, max_val], [min_val, max_val], color='gray', linestyle='--', linewidth=2, zorder=2)
+    plt.scatter(y_test, y_pred, c='cornflowerblue', alpha=0.85, zorder=3)
+    plt.text(min_val + 0.05 * (max_val - min_val), max_val - 0.15 * (max_val - min_val),
+             f'CV R² = {cv_r2_scores.mean():.2f}\nCV RMSE = {-cv_rmse_scores.mean():.2f}\nCV MAE = {-cv_mae_scores.mean():.2f}',
+             fontsize=12, color='black', bbox=dict(facecolor='white', alpha=0.8))
+    plt.xlabel('Observations')
+    plt.ylabel('Predictions')
+    plt.title(f'{model_name} Regression')
+    plt.xlim(min_val, max_val)
+    plt.ylim(min_val, max_val)
+    plt.grid(False)
+    plt.show()
+
+# Run all models
+for model_name, model in models.items():
+    evaluate_model(model, model_name, X_train, y_train, X_test, y_test)
+
+
+
+
+###prediction
+import pandas as pd
+import geopandas as gpd
+from shapely.geometry import Point
+import matplotlib.pyplot as plt
+import numpy as np
+from rasterio.features import rasterize
+from rasterio.enums import Resampling
+import rasterio
+from rasterio.plot import show
+from rasterio.crs import CRS
+import os
+import cartopy.crs as ccrs
+import matplotlib.colors as mcolors
+
+file_path = 'C:/New_Global plant functional trait/Global_LT/LT_Predicted_result_updated.csv'
+data = pd.read_csv(file_path)
+
+print("Checking for NaN values:")
+print(data.isna().sum())
+
+xmin = np.floor(data['Longitude'].min() / 0.05) * 0.05
+xmax = np.ceil(data['Longitude'].max() / 0.05) * 0.05
+ymin = np.floor(data['Latitude'].min() / 0.05) * 0.05
+ymax = np.ceil(data['Latitude'].max() / 0.05) * 0.05
+resolution = 0.05  # Raster cell size
+
+geometry = [Point(xy) for xy in zip(data.Longitude, data.Latitude)]
+gdf = gpd.GeoDataFrame(data, geometry=geometry, crs="EPSG:4326")
+
+width = int((xmax - xmin) / resolution)
+height = int((ymax - ymin) / resolution)
+transform = rasterio.transform.from_bounds(xmin, ymin, xmax, ymax, width, height)
+
+kwargs = {
+    'driver': 'GTiff',
+    'height': height,
+    'width': width,
+    'count': 1,
+    'dtype': rasterio.float32,
+    'crs': CRS.from_epsg(4326),
+    'transform': transform
+}
+
+output_file = 'C:/New_Global plant functional trait/Global_LT/output_LT.tif'
+
+with rasterio.open(output_file, 'w', **kwargs) as dst:
+    out_image = np.zeros((height, width), dtype=rasterio.float32)
+    shapes = ((geom, value) for geom, value in zip(gdf.geometry, gdf['LT']))
+    burned = rasterize(shapes, out_shape=(height, width), fill=np.nan, transform=transform, all_touched=True)
+    out_image[~np.isnan(burned)] = burned[~np.isnan(burned)]
+    dst.write(out_image, 1)
+
+boundary_file = 'C:/New_Global plant functional trait/Global_LT/continent.shp'
+boundaries = gpd.read_file(boundary_file).to_crs(CRS.from_epsg(4326))
+#points for colour breaks
+colors = [
+    (0.0, '#FFFFFF'),
+    (0.2459745, 'royalblue'),
+    (0.2942140, 'lime'),
+    (0.3621201, 'gold'),
+    (1.0, 'red')
+]
+
+cmap = mcolors.LinearSegmentedColormap.from_list('custom_cmap', colors)
+
+cmap.set_bad(color='#FFFFFF')
+
+with rasterio.open(output_file) as src:
+    arr = src.read(1)
+    fig, ax = plt.subplots(subplot_kw={'projection': ccrs.Robinson()})
+    ax.set_global()
+
+    im = ax.imshow(arr, extent=[xmin, xmax, ymin, ymax], origin='upper', transform=ccrs.PlateCarree(), cmap=cmap)
+
+    boundaries.boundary.plot(ax=ax, color='black', linewidth=0.5, transform=ccrs.PlateCarree())
+
+    ax.coastlines(resolution='50m', color='black', linewidth=0.5)
+
+    gl = ax.gridlines(draw_labels=False, linestyle='', color='none', alpha=0.5)
+    gl.top_labels = False
+    gl.right_labels = False
+    gl.xlines = False
+    gl.ylines = False
+
+    cbar = plt.colorbar(im, ax=ax, orientation='horizontal', shrink=0.5, aspect=50, pad=0.05)
+    cbar.set_label('LT(mm)')
+    plt.show()
+
+print(f"Raster image has been saved to '{output_file}'.")
