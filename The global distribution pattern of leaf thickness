@@ -102,8 +102,7 @@ def evaluate_model(model, model_name, X_train, y_train, X_test, y_test):
 for model_name, model in models.items():
     evaluate_model(model, model_name, X_train, y_train, X_test, y_test)
 
-
-###Prediction
+###Prediction and Mapping the globe
 import os
 import pandas as pd
 import numpy as np
@@ -111,59 +110,60 @@ from sklearn.ensemble import RandomForestRegressor
 from sklearn.model_selection import train_test_split, cross_val_score
 from sklearn.metrics import mean_absolute_error, r2_score, mean_squared_error
 from sklearn.preprocessing import MinMaxScaler, LabelEncoder
+import geopandas as gpd
+from shapely.geometry import Point
+import matplotlib.pyplot as plt
+import rasterio
+from rasterio.features import rasterize
+from rasterio.enums import Resampling
+from rasterio.plot import show
+from rasterio.crs import CRS
+import cartopy.crs as ccrs
+import matplotlib.colors as mcolors
 
-
-os.environ['JOBLIB_TEMP_FOLDER'] = 'C:/temp'
-
-
+# Set environment variables
+os.environ['JOBLIB_TEMP_FOLDER'] = '/temp'
 os.environ['PYTHONIOENCODING'] = 'utf-8'
 
-
-df_path = 'C:/New_Global plant functional trait/Global_LT/LT_ALL_New_Drop.csv'
+# Load and preprocess training data
+df_path = '/code/Model training data of leaf thickness.csv'
 df = pd.read_csv(df_path)
 
-# Checking for NaN values
+# Checking for NaN values in training data
 print("Checking for NaN values:")
 print(df.isnull().sum())
 
-
 num_features = [
-    'Altitude', 'Drought_index', 'MAT', 'Isothermality',
-    'Temperature_Seasonality', 'Mean_Temperature_of_Warmest_Quarter', 'Mean_Temperature_of_Coldest_Quarter',
-    'MAP', 'Precipitation_of_Wettest_Month', 'Precipitation_of_Driest_Month',
-    'Precipitation_Seasonality', 'Precipitation_of_Wettest_Quarter', 'Precipitation_of_Driest_Quarter',
-    'Precipitation_of_Coldest_Quarter', 'Soil_bulk', 'Soil_clay', 'Soil_cn', 'Soil_n',
-    'Soil_ph', 'Soil_sand', 'Soil_silt', 'Solar_irradiance', 'Slope', 'Roughness', 'GPP', 'NDVI',
+    'Altitude', 'Drought_index', 'MAT', 'Isothermality', 'Mean_Diurnal_Range',
+    'Temperature_Seasonality', 'Temperature_Annual_Range', 'Mean_Temperature_of_Wettest_Quarter', 'Mean_Temperature_of_Driest_Quarter', 'Mean_Temperature_of_Warmest_Quarter', 'Mean_Temperature_of_Coldest_Quarter',
+    'Precipitation_of_Wettest_Month', 'Precipitation_of_Driest_Month',
+    'Precipitation_Seasonality', 'Precipitation_of_Wettest_Quarter',
+    'Precipitation_of_Warmest_Quarter', 'Soil_clay', 'Soil_cn', 'Soil_n',
+    'Soil_ph', 'Soil_sand', 'Soil_silt', 'LAI', 'Slope', 'Roughness', 'GPP', 'NDVI',
     'Longitude', 'Latitude'
 ]
 cat_features = ['PlantGrowthForm']
 
-
 scaler = MinMaxScaler()
 df[num_features] = scaler.fit_transform(df[num_features])
-
 
 label_encoder = LabelEncoder()
 for feature in cat_features:
     df[feature] = label_encoder.fit_transform(df[feature])
 
-
 X = df.drop(columns=['LT'])
 y = df['LT'].values
 
-
 X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=0.2, random_state=42)
 
-# Creating a Random Forest Regressor
+# Creating and training a Random Forest Regressor
 rf_regressor = RandomForestRegressor(random_state=42)
-
-# Training Models
 rf_regressor.fit(X_train, y_train)
 
-
+# Evaluate the model
 cv_r2_scores = cross_val_score(rf_regressor, X_train, y_train, cv=10, scoring='r2')
-cv_mae_scores = cross_val_score(rf_regressor, X_train, y_train, cv=10, scoring='neg_mean_absolute_error')
-cv_rmse_scores = cross_val_score(rf_regressor, X_train, y_train, cv=10, scoring='neg_root_mean_squared_error')
+cv_mae_scores = -cross_val_score(rf_regressor, X_train, y_train, cv=10, scoring='neg_mean_absolute_error')
+cv_rmse_scores = -cross_val_score(rf_regressor, X_train, y_train, cv=10, scoring='neg_root_mean_squared_error')
 
 print(f"Cross-validation R² scores: {cv_r2_scores}")
 print(f"Average R² score: {cv_r2_scores.mean()}")
@@ -180,15 +180,14 @@ print(f"Mean Absolute Error (MAE): {mae}")
 print(f"Coefficient of Determination (R²): {r2}")
 print(f"Root Mean Squared Error (RMSE): {rmse}")
 
-# Reading data for predictor covariates
-predict_data_path = 'C:/New_Global plant functional trait/Global_LT/LT_predicted_data_filtered_abnormal.csv'
+# Reading and preprocessing data for predictions
+predict_data_path = '/code/LT_predicted_data_filtered_abnormal_New.csv'
 predict_df = pd.read_csv(predict_data_path)
 
 # Checking for outliers in predicted data
 print("Checking for NaN values in predict_df:")
 print(predict_df.isnull().sum())
 
-# Checking for infinity values in predicted data
 print("Checking for infinite values in predict_df:")
 print(np.isinf(predict_df[num_features]).any())
 
@@ -199,10 +198,8 @@ predict_df = predict_df[~np.isinf(predict_df[num_features]).any(axis=1)]
 print("Checking for NaN values in predict_df after removing infinities:")
 print(predict_df.isnull().sum())
 
-# Ensure that the feature columns of the predicted data are consistent with the training data
 if set(predict_df.columns) != set(X.columns):
     raise ValueError("The feature columns of the predicted data do not match the training data, please check the data file.")
-
 
 predict_df[num_features] = scaler.transform(predict_df[num_features])
 for feature in cat_features:
@@ -210,7 +207,6 @@ for feature in cat_features:
 
 # Prediction using trained models
 predictions = rf_regressor.predict(predict_df[X.columns])
-
 
 output_df = predict_df.copy()
 output_df['LT'] = predictions
@@ -222,34 +218,10 @@ output_df[num_features] = scaler.inverse_transform(output_df[num_features])
 for feature in cat_features:
     output_df[feature] = label_encoder.inverse_transform(output_df[feature])
 
-# Saving the denormalised data to a new CSV file
-output_df.to_csv('C:/New_Global plant functional trait/Global_LT/LT_Predicted_result_updated.csv', index=False)
+# Directly use output_df for mapping without saving to CSV
+data = output_df
 
-print("Predictions and unstandardized features saved to 'LT_Predicted_result_updated.csv'.")
-
-
-
-
-
-###Mapping the globe
-import pandas as pd
-import geopandas as gpd
-from shapely.geometry import Point
-import matplotlib.pyplot as plt
-import numpy as np
-from rasterio.features import rasterize
-from rasterio.enums import Resampling
-import rasterio
-from rasterio.plot import show
-from rasterio.crs import CRS
-import os
-import cartopy.crs as ccrs
-import matplotlib.colors as mcolors
-
-file_path = 'C:/New_Global plant functional trait/Global_LT/LT_Predicted_result_updated.csv'
-data = pd.read_csv(file_path)
-
-print("Checking for NaN values:")
+print("Checking for NaN values in processed data:")
 print(data.isna().sum())
 
 xmin = np.floor(data['Longitude'].min() / 0.05) * 0.05
@@ -275,7 +247,7 @@ kwargs = {
     'transform': transform
 }
 
-output_file = 'C:/New_Global plant functional trait/Global_LT/output_LT.tif'
+output_file = '/code/output_LT.tif'
 
 with rasterio.open(output_file, 'w', **kwargs) as dst:
     out_image = np.zeros((height, width), dtype=rasterio.float32)
@@ -284,9 +256,10 @@ with rasterio.open(output_file, 'w', **kwargs) as dst:
     out_image[~np.isnan(burned)] = burned[~np.isnan(burned)]
     dst.write(out_image, 1)
 
-boundary_file = 'C:/New_Global plant functional trait/Global_LT/continent.shp'
-boundaries = gpd.read_file(boundary_file).to_crs(CRS.from_epsg(4326))
-#points for colour breaks
+boundary_file = '/code/continent.shp'
+boundaries = gpd.read_file(boundary_file, engine='fiona').to_crs(CRS.from_epsg(4326))
+
+# Define color breaks
 colors = [
     (0.0, '#FFFFFF'),
     (0.2459745, 'royalblue'),
@@ -296,7 +269,6 @@ colors = [
 ]
 
 cmap = mcolors.LinearSegmentedColormap.from_list('custom_cmap', colors)
-
 cmap.set_bad(color='#FFFFFF')
 
 with rasterio.open(output_file) as src:
@@ -307,7 +279,6 @@ with rasterio.open(output_file) as src:
     im = ax.imshow(arr, extent=[xmin, xmax, ymin, ymax], origin='upper', transform=ccrs.PlateCarree(), cmap=cmap)
 
     boundaries.boundary.plot(ax=ax, color='black', linewidth=0.5, transform=ccrs.PlateCarree())
-
     ax.coastlines(resolution='50m', color='black', linewidth=0.5)
 
     gl = ax.gridlines(draw_labels=False, linestyle='', color='none', alpha=0.5)
