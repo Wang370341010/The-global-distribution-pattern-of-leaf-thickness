@@ -1,4 +1,4 @@
-###machine learning model
+###Machine learning model
 import os
 import pandas as pd
 import numpy as np
@@ -103,9 +103,135 @@ for model_name, model in models.items():
     evaluate_model(model, model_name, X_train, y_train, X_test, y_test)
 
 
+###Prediction
+import os
+import pandas as pd
+import numpy as np
+from sklearn.ensemble import RandomForestRegressor
+from sklearn.model_selection import train_test_split, cross_val_score
+from sklearn.metrics import mean_absolute_error, r2_score, mean_squared_error
+from sklearn.preprocessing import MinMaxScaler, LabelEncoder
 
 
-###prediction
+os.environ['JOBLIB_TEMP_FOLDER'] = 'C:/temp'
+
+
+os.environ['PYTHONIOENCODING'] = 'utf-8'
+
+
+df_path = 'C:/New_Global plant functional trait/Global_LT/LT_ALL_New_Drop.csv'
+df = pd.read_csv(df_path)
+
+# Checking for NaN values
+print("Checking for NaN values:")
+print(df.isnull().sum())
+
+
+num_features = [
+    'Altitude', 'Drought_index', 'MAT', 'Isothermality',
+    'Temperature_Seasonality', 'Mean_Temperature_of_Warmest_Quarter', 'Mean_Temperature_of_Coldest_Quarter',
+    'MAP', 'Precipitation_of_Wettest_Month', 'Precipitation_of_Driest_Month',
+    'Precipitation_Seasonality', 'Precipitation_of_Wettest_Quarter', 'Precipitation_of_Driest_Quarter',
+    'Precipitation_of_Coldest_Quarter', 'Soil_bulk', 'Soil_clay', 'Soil_cn', 'Soil_n',
+    'Soil_ph', 'Soil_sand', 'Soil_silt', 'Solar_irradiance', 'Slope', 'Roughness', 'GPP', 'NDVI',
+    'Longitude', 'Latitude'
+]
+cat_features = ['PlantGrowthForm']
+
+
+scaler = MinMaxScaler()
+df[num_features] = scaler.fit_transform(df[num_features])
+
+
+label_encoder = LabelEncoder()
+for feature in cat_features:
+    df[feature] = label_encoder.fit_transform(df[feature])
+
+
+X = df.drop(columns=['LT'])
+y = df['LT'].values
+
+
+X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=0.2, random_state=42)
+
+# Creating a Random Forest Regressor
+rf_regressor = RandomForestRegressor(random_state=42)
+
+# Training Models
+rf_regressor.fit(X_train, y_train)
+
+
+cv_r2_scores = cross_val_score(rf_regressor, X_train, y_train, cv=10, scoring='r2')
+cv_mae_scores = cross_val_score(rf_regressor, X_train, y_train, cv=10, scoring='neg_mean_absolute_error')
+cv_rmse_scores = cross_val_score(rf_regressor, X_train, y_train, cv=10, scoring='neg_root_mean_squared_error')
+
+print(f"Cross-validation R² scores: {cv_r2_scores}")
+print(f"Average R² score: {cv_r2_scores.mean()}")
+print(f"Cross-validation MAE scores: {-cv_mae_scores}")
+print(f"Average MAE score: {-cv_mae_scores.mean()}")
+print(f"Cross-validation RMSE scores: {-cv_rmse_scores}")
+print(f"Average RMSE score: {-cv_rmse_scores.mean()}")
+
+y_pred = rf_regressor.predict(X_test)
+mae = mean_absolute_error(y_test, y_pred)
+r2 = r2_score(y_test, y_pred)
+rmse = np.sqrt(mean_squared_error(y_test, y_pred))
+print(f"Mean Absolute Error (MAE): {mae}")
+print(f"Coefficient of Determination (R²): {r2}")
+print(f"Root Mean Squared Error (RMSE): {rmse}")
+
+# Reading data for predictor covariates
+predict_data_path = 'C:/New_Global plant functional trait/Global_LT/LT_predicted_data_filtered_abnormal.csv'
+predict_df = pd.read_csv(predict_data_path)
+
+# Checking for outliers in predicted data
+print("Checking for NaN values in predict_df:")
+print(predict_df.isnull().sum())
+
+# Checking for infinity values in predicted data
+print("Checking for infinite values in predict_df:")
+print(np.isinf(predict_df[num_features]).any())
+
+# Removing infinity values from predicted data
+predict_df = predict_df[~np.isinf(predict_df[num_features]).any(axis=1)]
+
+# Re-checking for outliers in the predicted data
+print("Checking for NaN values in predict_df after removing infinities:")
+print(predict_df.isnull().sum())
+
+# Ensure that the feature columns of the predicted data are consistent with the training data
+if set(predict_df.columns) != set(X.columns):
+    raise ValueError("The feature columns of the predicted data do not match the training data, please check the data file.")
+
+
+predict_df[num_features] = scaler.transform(predict_df[num_features])
+for feature in cat_features:
+    predict_df[feature] = label_encoder.transform(predict_df[feature])
+
+# Prediction using trained models
+predictions = rf_regressor.predict(predict_df[X.columns])
+
+
+output_df = predict_df.copy()
+output_df['LT'] = predictions
+
+# Inverse normalisation of all numerical features
+output_df[num_features] = scaler.inverse_transform(output_df[num_features])
+
+# Back-standardisation of categorical data
+for feature in cat_features:
+    output_df[feature] = label_encoder.inverse_transform(output_df[feature])
+
+# Saving the denormalised data to a new CSV file
+output_df.to_csv('C:/New_Global plant functional trait/Global_LT/LT_Predicted_result_updated.csv', index=False)
+
+print("Predictions and unstandardized features saved to 'LT_Predicted_result_updated.csv'.")
+
+
+
+
+
+###Mapping the globe
 import pandas as pd
 import geopandas as gpd
 from shapely.geometry import Point
